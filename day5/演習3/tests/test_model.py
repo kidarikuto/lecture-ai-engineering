@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import pickle
 import time
+import json
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
@@ -16,6 +17,7 @@ from sklearn.pipeline import Pipeline
 DATA_PATH = os.path.join(os.path.dirname(__file__), "../data/Titanic.csv")
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "../models")
 MODEL_PATH = os.path.join(MODEL_DIR, "titanic_model.pkl")
+BASELINE_PATH = os.path.join(MODEL_DIR, "baseline_metrics.json")
 
 
 @pytest.fixture
@@ -109,6 +111,19 @@ def test_model_exists():
     assert os.path.exists(MODEL_PATH), "モデルファイルが存在しません"
 
 
+def load_baseline_metrics():
+    """ベースラインの性能指標を読み込み"""
+    if not os.path.exists(BASELINE_PATH):
+        return None
+    with open(BASELINE_PATH, 'r') as f:
+        return json.load(f)
+    
+def save_baseline_metrics(metrics):
+    """ベースラインの性能指標を保存"""
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    with open(BASELINE_PATH, 'w') as f:
+        json.dump(metrics, f, indent=4)
+
 def test_model_accuracy(train_model):
     """モデルの精度を検証"""
     model, X_test, y_test = train_model
@@ -120,6 +135,25 @@ def test_model_accuracy(train_model):
     # Titanicデータセットでは0.75以上の精度が一般的に良いとされる
     assert accuracy >= 0.75, f"モデルの精度が低すぎます: {accuracy}"
 
+    # ベースラインの読み込み
+    baseline_metrics = load_baseline_metrics()
+    # jsonファイルが存在しない時
+    if baseline_metrics is None:
+        data = {'max_acc_model':{'accuracy': accuracy}}
+        save_baseline_metrics(data)
+        print(f"新しいベースラインを保存: accuracy = {accuracy}")
+    else:
+        if len(baseline_metrics) >=1:
+            pre_acc = baseline_metrics['max_acc_model']['accuracy']
+        if 'max_acc_model' not in baseline_metrics and len(baseline_metrics)==1:
+            pre_acc = baseline_metrics['default']['accuracy']
+        # ベースラインと比較
+        assert accuracy >= pre_acc , f"モデル精度が劣化しています:pre_acc={pre_acc},acc={accuracy}"
+        baseline_metrics['max_acc_model'] = {
+            'accuracy':accuracy
+        }
+        save_baseline_metrics(baseline_metrics)
+
 
 def test_model_inference_time(train_model):
     """モデルの推論時間を検証"""
@@ -129,7 +163,6 @@ def test_model_inference_time(train_model):
     start_time = time.time()
     model.predict(X_test)
     end_time = time.time()
-
     inference_time = end_time - start_time
 
     # 推論時間が1秒未満であることを確認
