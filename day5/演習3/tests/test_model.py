@@ -1,18 +1,19 @@
+import json
 import os
-import pytest
-import pandas as pd
-import numpy as np
 import pickle
 import time
-import json
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
+
+import numpy as np
+import pandas as pd
+import pytest
 from scipy.stats import entropy
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 # テスト用データとモデルパスを定義
 DATA_PATH = os.path.join(os.path.dirname(__file__), "../data/Titanic.csv")
