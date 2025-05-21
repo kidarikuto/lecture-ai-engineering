@@ -1,17 +1,19 @@
+import json
 import os
-import pytest
-import pandas as pd
-import numpy as np
 import pickle
 import time
-import json
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+import numpy as np
+import pandas as pd
+import pytest
+from scipy.stats import entropy
 from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 # テスト用データとモデルパスを定義
 DATA_PATH = os.path.join(os.path.dirname(__file__), "../data/Titanic.csv")
@@ -76,14 +78,19 @@ def preprocessor():
 
 
 @pytest.fixture
-def train_model(sample_data, preprocessor):
-    """モデルの学習とテストデータの準備"""
-    # データの分割とラベル変換
+def data_split(sample_data):
     X = sample_data.drop("Survived", axis=1)
     y = sample_data["Survived"].astype(int)
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
+    return X_train, X_test, y_train, y_test
+
+
+@pytest.fixture
+def train_model(data_split, sample_data, preprocessor):
+    """モデルの学習とテストデータの準備"""
+    X_train, X_test, y_train, y_test = data_split
 
     # モデルパイプラインの作成
     model = Pipeline(
@@ -115,14 +122,16 @@ def load_baseline_metrics():
     """ベースラインの性能指標を読み込み"""
     if not os.path.exists(BASELINE_PATH):
         return None
-    with open(BASELINE_PATH, 'r') as f:
+    with open(BASELINE_PATH, "r") as f:
         return json.load(f)
-    
+
+
 def save_baseline_metrics(metrics):
     """ベースラインの性能指標を保存"""
     os.makedirs(MODEL_DIR, exist_ok=True)
-    with open(BASELINE_PATH, 'w') as f:
+    with open(BASELINE_PATH, "w") as f:
         json.dump(metrics, f, indent=4)
+
 
 def test_model_accuracy(train_model):
     """モデルの精度を検証"""
@@ -139,19 +148,19 @@ def test_model_accuracy(train_model):
     baseline_metrics = load_baseline_metrics()
     # jsonファイルが存在しない時
     if baseline_metrics is None:
-        data = {'max_acc_model':{'accuracy': accuracy}}
+        data = {"max_acc_model": {"accuracy": accuracy}}
         save_baseline_metrics(data)
         print(f"新しいベースラインを保存: accuracy = {accuracy}")
     else:
-        if len(baseline_metrics) >=1:
-            pre_acc = baseline_metrics['max_acc_model']['accuracy']
-        if 'max_acc_model' not in baseline_metrics and len(baseline_metrics)==1:
-            pre_acc = baseline_metrics['default']['accuracy']
+        if len(baseline_metrics) >= 1:
+            pre_acc = baseline_metrics["max_acc_model"]["accuracy"]
+        if "max_acc_model" not in baseline_metrics and len(baseline_metrics) == 1:
+            pre_acc = baseline_metrics["default"]["accuracy"]
         # ベースラインと比較
-        assert accuracy >= pre_acc , f"モデル精度が劣化しています:pre_acc={pre_acc},acc={accuracy}"
-        baseline_metrics['max_acc_model'] = {
-            'accuracy':accuracy
-        }
+        assert (
+            accuracy >= pre_acc
+        ), f"モデル精度が劣化しています:pre_acc={pre_acc},acc={accuracy}"
+        baseline_metrics["max_acc_model"] = {"accuracy": accuracy}
         save_baseline_metrics(baseline_metrics)
 
 
@@ -204,3 +213,43 @@ def test_model_reproducibility(sample_data, preprocessor):
     assert np.array_equal(
         predictions1, predictions2
     ), "モデルの予測結果に再現性がありません"
+
+
+@pytest.fixture
+def compute_kl_divergence(data_split, bins=50, epsilon=1):
+    X_train, X_test, y_train, y_test = data_split
+
+    # 数値カラムだけ抽出し、PassengerIdを除外
+    numeric_cols = X_train.select_dtypes(include=[np.number]).columns
+    numeric_cols = [col for col in numeric_cols if col != "PassengerId"]
+    kl_divs = []
+
+    for col in numeric_cols:
+        train_feat = X_train[col].dropna()
+        test_feat = X_test[col].dropna()
+
+        # ヒストグラムで確率分布に変換（正規化）
+        p_hist, _ = np.histogram(train_feat, bins=bins, density=True)
+        q_hist, _ = np.histogram(test_feat, bins=bins, density=True)
+
+        # ゼロ除算を避けるためにスムージング（epsilonを足す）
+        p_hist += epsilon
+        q_hist += epsilon
+
+        # 正規化
+        p = p_hist / np.sum(p_hist)
+        q = q_hist / np.sum(q_hist)
+
+        # KL divergence 計算
+        kl = entropy(p, q)
+        kl_divs.append((col, kl))
+
+    return kl_divs
+
+
+def test_kl_divergence(compute_kl_divergence, kl_threshold=0.5):
+    """訓練データとテストデータ分布の確認"""
+    kl_divs = compute_kl_divergence
+    for col, kl in kl_divs:
+        print(f"Feature {col} KL divergence: {kl:.4f}")
+        assert kl < kl_threshold, f"Feature {col} KL divergence too high: {kl:.4f}"

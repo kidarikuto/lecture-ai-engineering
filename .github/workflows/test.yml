@@ -33,7 +33,7 @@ jobs:
         black --check day5/演習3
     - name: Check import order with isort
       run: |
-        pip install isot
+        pip install isort
         isort --check --diff day5/演習3
         
     - name: Run data tests
