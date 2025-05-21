@@ -144,3 +144,7 @@ gh pr create
 2. **差分テスト**  
    - 過去バージョンと比較して性能の劣化がないか確認  
    - 例: `accuracy ≥ baseline`
+
+## 宿題の内容
+1. テスト処理の追加
+1. Github Actionの追加
