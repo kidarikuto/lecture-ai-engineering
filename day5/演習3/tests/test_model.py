@@ -12,6 +12,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
+from scipy.stats import entropy
 
 # テスト用データとモデルパスを定義
 DATA_PATH = os.path.join(os.path.dirname(__file__), "../data/Titanic.csv")
@@ -74,16 +75,19 @@ def preprocessor():
 
     return preprocessor
 
-
 @pytest.fixture
-def train_model(sample_data, preprocessor):
-    """モデルの学習とテストデータの準備"""
-    # データの分割とラベル変換
+def data_split(sample_data):
     X = sample_data.drop("Survived", axis=1)
     y = sample_data["Survived"].astype(int)
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
+    return X_train, X_test, y_train, y_test
+
+@pytest.fixture
+def train_model(data_split, sample_data, preprocessor):
+    """モデルの学習とテストデータの準備"""
+    X_train, X_test, y_train, y_test = data_split
 
     # モデルパイプラインの作成
     model = Pipeline(
@@ -204,3 +208,41 @@ def test_model_reproducibility(sample_data, preprocessor):
     assert np.array_equal(
         predictions1, predictions2
     ), "モデルの予測結果に再現性がありません"
+
+@pytest.fixture
+def compute_kl_divergence(data_split, bins=50, epsilon=1):
+    X_train, X_test, y_train, y_test = data_split
+
+    # 数値カラムだけ抽出し、PassengerIdを除外
+    numeric_cols = X_train.select_dtypes(include=[np.number]).columns
+    numeric_cols = [col for col in numeric_cols if col != "PassengerId"]
+    kl_divs = []
+
+    for col in numeric_cols:
+        train_feat = X_train[col].dropna()
+        test_feat = X_test[col].dropna()
+
+        # ヒストグラムで確率分布に変換（正規化）
+        p_hist, _ = np.histogram(train_feat, bins=bins, density=True)
+        q_hist, _ = np.histogram(test_feat, bins=bins, density=True)
+
+        # ゼロ除算を避けるためにスムージング（epsilonを足す）
+        p_hist += epsilon
+        q_hist += epsilon
+
+        # 正規化
+        p = p_hist / np.sum(p_hist)
+        q = q_hist / np.sum(q_hist)
+
+        # KL divergence 計算
+        kl = entropy(p, q)
+        kl_divs.append((col, kl))
+
+    return kl_divs
+
+def test_kl_divergence(compute_kl_divergence, kl_threshold=0.5):
+    '''訓練データとテストデータ分布の確認'''
+    kl_divs = compute_kl_divergence
+    for col, kl in kl_divs:
+        print(f"Feature {col} KL divergence: {kl:.4f}")
+        assert kl < kl_threshold, f"Feature {col} KL divergence too high: {kl:.4f}"
